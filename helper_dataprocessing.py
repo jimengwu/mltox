@@ -91,7 +91,7 @@ def prefilter(species,
 def impute_conc(results_prefiltered):
 
     db = results_prefiltered.copy()
-
+    db.loc[:,'conc1_unit'] = db.conc1_unit.apply(lambda x: x.replace("AI ", "") if 'AI' in x else x)
     good_conc_unit = ['ppb', 'ppm', 'ug/L', 'ng/L', 'mg/L', 'ng/ml', 'mg/dm3',\
     'umol/L','mmol/L','ug/ml','g/L','ng/ml','nmol/L','mol/L','g/dm3','ug/dm3']
 
