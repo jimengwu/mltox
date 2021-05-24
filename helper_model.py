@@ -56,8 +56,10 @@ non_categorical = [
     "Mol",
     "MorganDensity",
     "LogP",
-    "water_solubility",
-    "melting_point",
+    # "water_solubility",
+    # "melting_point",
+    'MeltingPoint',
+    'WaterSolubility'
 ]
 # comparing was used to identify similar experiments
 comparing = ["test_cas"] + categorical
@@ -202,11 +204,15 @@ def load_data(DATA_PATH,
               encoding_value=1,
               seed=42):
     db = pd.read_csv(DATA_PATH).drop(drop_columns, axis=1)
-    for nc in non_categorical_columns:
-        minmax = MinMaxScaler()
-        minmax.fit(db[[nc]])
-        db[[nc]] = minmax.transform(db[[nc]])
-
+    db = db[:1000]
+    db_pub = pd.concat([db["test_cas"],
+                pd.DataFrame(pd.DataFrame(db['pubchem2d'].values).\
+                             apply(lambda x: x.str.replace('', ' ').str.strip().str.split(' '),
+                                                                        axis = 1)[0].to_list(),
+                   columns = ['pub'+ str(i) for i in range(1,882)])],
+               axis = 1).drop_duplicates()
+    db = db.merge(db_pub, on="test_cas").reset_index(drop=True)
+    db.drop(columns="pubchem2d", inplace=True)
     # Ordinal Encoding for categorical variables
     encoder = OrdinalEncoder(dtype=int)
     encoder.fit(db[categorical_columns])
@@ -333,7 +339,11 @@ def load_invivo_invitro(DATA_PATH,
 
 
 def hamming_matrix(X1, X2, cat_features):
-    return squareform(pdist(X1[cat_features], metric="hamming"))
+    if X1.shape == X2.shape:
+        if np.all(X1 == X2):
+            return squareform(pdist(X1[cat_features], metric="hamming"))
+    else:
+        return cdist(X1[cat_features], X2[cat_features], metric="hamming")
 
 
 def hamming_matrix_df(X1, X2, cat_features):
@@ -345,7 +355,11 @@ def euclidean_matrix_df(X1, X2, num_features):
 
 
 def euclidean_matrix(X1, X2, num_features):
-    return squareform(pdist(X1[num_features], metric="euclidean"))
+    if X1.shape == X2.shape:
+        if np.all(X1 == X2):
+            return squareform(pdist(X1[num_features], metric="euclidean"))
+    else:
+        return cdist(X1[num_features], X2[num_features], metric="euclidean")
 
 
 def change_label(x):
@@ -353,12 +367,32 @@ def change_label(x):
 
 
 def pubchem2d_matrix(X1, X2):
-    return squareform(
-        pdist(pd.DataFrame([
-            x.replace("", " ").strip().split(' ')
-            for x in list(X1["pubchem2d"])
-        ]),
-              metric="hamming"))
+    if X1.shape == X2.shape:
+        if np.all(X1 == X2):
+            # return squareform(
+            #     pdist(pd.DataFrame([
+            #         x.replace("", " ").strip().split(' ')
+            #         for x in list(X1["pubchem2d"])
+            #     ]),
+            #           metric="hamming"))
+            return squareform(
+                pdist(X1[X1.columns[X1.columns.str.contains('pub')]],
+                      metric="hamming"))
+    else:
+        return cdist(X1[X1.columns[X1.columns.str.contains('pub')]],
+                     X2[X2.columns[X2.columns.str.contains('pub')]],
+                     metric="hamming")
+        # df_1 = pd.DataFrame([
+        #     x.replace("", " ").strip().split(' ')
+        #     for x in list(X1["pubchem2d"])
+        # ])
+
+        # df_2 = pd.DataFrame([
+        #     x.replace("", " ").strip().split(' ')
+        #     for x in list(X2["pubchem2d"])
+        # ])
+
+        # return cdist(df_1, df_2, metric="hamming")
 
 
 def pubchem2d_matrix_df(X1, X2):
@@ -384,6 +418,12 @@ def cal_matrixs(X1, X2, categorical, non_categorical):
     return basic_mat, matrix_h, matrix_p
 
 
+def cal_h_p_matrixs(X1, X2, categorical):
+    matrix_h = hamming_matrix(X1, X2, categorical)
+    matrix_p = pubchem2d_matrix(X1, X2)
+    return matrix_h, matrix_p
+
+
 # euclidean matrix will always has 1 as parameter.
 def matrix_combine(basic_mat, matrix_h, matrix_p, ah, ap):
     dist_matr = ah * matrix_h
@@ -394,29 +434,29 @@ def matrix_combine(basic_mat, matrix_h, matrix_p, ah, ap):
 
 
 def dist_matrix(X1, X2, non_categorical, categorical, ah, ap):
-    if X1.shape == X2.shape:
-        if np.all(X1 == X2):
-            matrix_h = hamming_matrix(X1, X2, categorical)
-            dist_matr = ah * matrix_h
-            del matrix_h
-            basic_mat = euclidean_matrix(X1, X2, non_categorical)
-            dist_matr += basic_mat
-            del basic_mat
-            matrix_p = pubchem2d_matrix(X1, X2)
-            dist_matr += ap * matrix_p
-            del matrix_p
-            dist_matr = pd.DataFrame(dist_matr)
-    else:
-        matrix_h = hamming_matrix_df(X1, X2, categorical)
-        dist_matr = ah * matrix_h
-        del matrix_h
-        basic_mat = euclidean_matrix_df(X1, X2, non_categorical)
-        dist_matr += basic_mat
-        del basic_mat
-        matrix_p = pubchem2d_matrix_df(X1, X2)
-        dist_matr += ap * matrix_p
-        del matrix_p
-        dist_matr = pd.DataFrame(dist_matr)
+    # if X1.shape == X2.shape:
+    #     if np.all(X1 == X2):
+    matrix_h = hamming_matrix(X1, X2, categorical)
+    dist_matr = ah * matrix_h
+    del matrix_h
+    basic_mat = euclidean_matrix(X1, X2, non_categorical)
+    dist_matr += basic_mat
+    del basic_mat
+    matrix_p = pubchem2d_matrix(X1, X2)
+    dist_matr += ap * matrix_p
+    del matrix_p
+    dist_matr = pd.DataFrame(dist_matr)
+    # else:
+    #     matrix_h = hamming_matrix_df(X1, X2, categorical)
+    #     dist_matr = ah * matrix_h
+    #     del matrix_h
+    #     basic_mat = euclidean_matrix_df(X1, X2, non_categorical)
+    #     dist_matr += basic_mat
+    #     del basic_mat
+    #     matrix_p = pubchem2d_matrix_df(X1, X2)
+    #     dist_matr += ap * matrix_p
+    #     del matrix_p
+    #     dist_matr = pd.DataFrame(dist_matr)
     return dist_matr
 
 
@@ -653,9 +693,7 @@ def load_datafusion_datasets_invitro(
 def select_alpha(X_train, sequence_ham, Y_train, categorical_columns,
                  non_categorical_columns, leaf_ls, neighbors):
     print("calcaulting the matrix...")
-    basic_mat, matrix_h, matrix_p = cal_matrixs(X_train, X_train,
-                                                categorical_columns,
-                                                non_categorical_columns)
+    matrix_h, matrix_p = cal_h_p_matrixs(X_train, X_train, categorical_columns)
     best_alpha_h = 0
     best_alpha_p = 0
     best_accs = 0
@@ -665,44 +703,70 @@ def select_alpha(X_train, sequence_ham, Y_train, categorical_columns,
         for ap in sequence_ham:
             for leaf in leaf_ls:
                 for neigh in neighbors:
-                    dist_matr = matrix_combine(basic_mat, matrix_h, matrix_p,
-                                               ah, ap)
-                    accs, rmse, sens, precs, f1 = KNN_model(
-                        dist_matr, Y_train, leaf, neigh)
+                    accs, sens, specs, precs, f1 = KNN_model(
+                        matrix_h, matrix_p, X_train, Y_train, leaf, neigh, ah,
+                        ap, non_categorical_columns)
                     avg_accs = np.mean(accs)
-                    se_accs = sem(accs)
-                    avg_rmse = np.mean(rmse)
-                    se_rmse = sem(rmse)
-                    avg_sens = np.mean(sens)
-                    se_sens = sem(sens)
-                    avg_precs = np.mean(precs)
-                    se_precs = sem(precs)
-                    avg_f1 = np.mean(f1)
-                    se_f1 = sem(f1)
-                    if avg_accs > best_accs:
+                    results = pd.DataFrame([[
+                        np.mean(accs),
+                        sem(accs),
+                        np.mean(sens),
+                        sem(sens),
+                        np.mean(specs),
+                        sem(specs),
+                        np.mean(precs),
+                        sem(precs),
+                        np.mean(f1),
+                        sem(f1)
+                    ]],
+                                           columns=[
+                                               'Acc', 'St.err Acc', 'Sens',
+                                               'St.err Sens', 'Spec',
+                                               'St.err Spec', 'Prec',
+                                               'St.err Prec', 'F1', 'St.err F1'
+                                           ])
+                    if avg_accs > best_accs + 0.001:
                         print(
-                            """New best params found! alpha_h:{}, alpha_p:{},rmse:{},accs:{}, leaf:{},neighbor:{}"""
-                            .format(ah, ap, avg_rmse, avg_accs, leaf, neigh))
+                            """New best params found! alpha_h:{}, alpha_p:{}, accs:{}, leaf:{},neighbor:{}"""
+                            .format(ah, ap, avg_accs, leaf, neigh))
                         best_alpha_h = ah
                         best_alpha_p = ap
-                        best_rmse = avg_rmse
-                        best_accs = avg_accs
                         best_leaf = leaf
                         best_neighbor = neigh
+                        best_results = results
+                        best_accs = avg_accs
 
-    return best_alpha_h, best_alpha_p, best_leaf, best_neighbor
+    return best_alpha_h, best_alpha_p, best_leaf, best_neighbor, best_results
 
 
-def KNN_model(X, Y, leaf, neighbor, seed=25):
+def KNN_model(matrix_h,
+              matrix_p,
+              X,
+              Y,
+              leaf,
+              neighbor,
+              ah,
+              ap,
+              non_categorical_columns,
+              seed=25):
     kf = KFold(n_splits=5, shuffle=True, random_state=seed)
     accs = []
-    rmse = []
     sens = []
+    specs = []
     precs = []
     f1 = []
     for train_index, test_index in kf.split(X):
-        x_train = X.iloc[train_index, train_index]
-        x_test = X.iloc[test_index, train_index]
+        X_new = X.copy()
+        minmax = MinMaxScaler().fit(
+            X.iloc[train_index][non_categorical_columns])
+        X_new[:][non_categorical_columns] = minmax.transform(
+            X.loc[:, non_categorical_columns])
+
+        euc_matr = euclidean_matrix(X_new, X_new, non_categorical_columns)
+        dist_matr = pd.DataFrame(euc_matr + ah * matrix_h + ap * matrix_p)
+
+        x_train = dist_matr.iloc[train_index, train_index]
+        x_test = dist_matr.iloc[test_index, train_index]
         y_train = Y[train_index]
         y_test = Y[test_index]
 
@@ -713,11 +777,12 @@ def KNN_model(X, Y, leaf, neighbor, seed=25):
         y_pred = neigh.predict(x_test)
 
         accs.append(accuracy_score(y_test, y_pred))
-        sens.append(recall_score(y_test, y_pred, average="weighted"))
-        precs.append(precision_score(y_test, y_pred, average="weighted"))
-        rmse.append(sqrt(mean_squared_error(y_test, y_pred)))
-        f1.append(f1_score(y_test, y_pred, average="weighted"))
-    return accs, rmse, sens, precs, f1
+        sens.append(recall_score(y_test, y_pred))
+        tn, fp, fn, tp = confusion_matrix(y_test, y_pred).ravel()
+        specs.append(tn / (tn + fp))
+        precs.append(precision_score(y_test, y_pred))
+        f1.append(f1_score(y_test, y_pred))
+    return accs, sens, specs, precs, f1
 
 
 # --------------------------------------------------------------------- RASAR---------------------------------------------------------
