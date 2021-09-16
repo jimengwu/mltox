@@ -1,16 +1,10 @@
-import pandas as pd
+from rdkit import Chem
+from rdkit.Chem import rdchem
+from rdkit.Chem import Descriptors
+from rdkit.Chem import Crippen
+from rdkit.Chem import MolFromSmarts
+from rdkit.Chem import MolFromSmiles
 import numpy as np
-# from rdkit import Chem
-from sklearn.preprocessing import MinMaxScaler
-# from rdkit.Chem import rdchem
-# from rdkit.Chem import Descriptors
-# from rdkit.Chem import Crippen
-# from rdkit.Chem import MolFromSmarts
-# from rdkit.Chem import MolFromSmiles
-from tqdm import tqdm
-from urllib.request import urlopen
-import pubchempy as pcp
-import re
 
 
 def atom_number(smile):
@@ -69,7 +63,7 @@ def bonds_number(smile):
     try:
         return rdchem.Mol.GetNumBonds(m)
     except:
-        return 'NaN'
+        return np.nan
 
 
 def ring_number(smile):
@@ -85,7 +79,7 @@ def ring_number(smile):
         f = rdchem.Mol.GetRingInfo(m)
         return f.NumRings()
     except:
-        return 'NaN'
+        return np.nan
 
 
 def Mol(smile):
@@ -101,7 +95,7 @@ def Mol(smile):
         m = Chem.MolFromSmiles(smile)
         return Descriptors.MolWt(m)
     except:
-        return 'NaN'
+        return np.nan
 
 
 def MorganDensity(smile):
@@ -117,7 +111,7 @@ def MorganDensity(smile):
     try:
         return Descriptors.FpDensityMorgan1(m)
     except:
-        return 'NaN'
+        return np.nan
 
 
 def LogP(smile):
@@ -133,7 +127,7 @@ def LogP(smile):
         m = Chem.MolFromSmiles(smile)
         return Crippen.MolLogP(m)
     except:
-        return 'NaN'
+        return np.nan
 
 
 def OH_count(smile):
@@ -145,53 +139,7 @@ def OH_count(smile):
         patt = MolFromSmarts('[OX2H]')
         return len(m.GetSubstructMatches(patt))
     except:
-        return 'NaN'
-
-
-def func(lst):
-    if lst != 'No data':
-        lst = [s for s in lst if ('°C' in str(s)) | ('°F' in str(s))]
-        try:
-            temp = max(lst, key=lst.count)
-        except:
-            temp = 'No data'
-    else:
-        temp = 'No data'
-    return temp
-
-
-def add_melting_point(smiles):
-    queue = []
-    for sm in tqdm(smiles):
-        try:
-            cid = re.findall('\d+',
-                             str(pcp.get_compounds(sm,
-                                                   namespace=u'smiles')))[0]
-            number = []
-            data = []
-            try:
-                webpage = urlopen(
-                    'https://pubchem.ncbi.nlm.nih.gov/rest/pug_view/data/compound/'
-                    + cid +
-                    '/JSON?heading=Melting+Point').read().decode('utf8')
-                temp = re.finditer(r'°', webpage)
-                for match in temp:
-                    a = match.start()
-                    number.append(webpage[int(a - 15):int(a + 2)])
-                for d in number:
-                    m = re.search("\d", d)
-                    data.append(d[m.start():])
-            except:
-                data = 'No data'
-        except:
-            data = 'No data'
-        queue.append(data)
-        medium = [func(x) for x in queue]
-        unit = [x[-2:] for x in medium]
-        point = [x[:-2] for x in medium]
-    # return queue
-
-    return unit, point
+        return np.nan
 
 
 def adding_smiles_features(dataframe):
@@ -214,9 +162,6 @@ def adding_smiles_features(dataframe):
     print("Finding ring number...")
     dataframe['ring_number'] = dataframe['smiles'].apply(ring_number)
 
-    print("Finding mol number...")
-    dataframe['Mol'] = dataframe['smiles'].apply(Mol)
-
     print("Finding morgan density...")
     dataframe['MorganDensity'] = dataframe['smiles'].apply(MorganDensity)
 
@@ -227,22 +172,9 @@ def adding_smiles_features(dataframe):
     dataframe['oh_count'] = dataframe['smiles'].apply(OH_count)
 
     print("Finding melting point...")
-    dataframe = dataframe[dataframe.melting_point != 'No da']
-    dataframe.loc[:,'melting_point'] = dataframe.melting_point\
-                                                        .apply(lambda x: x[x.index('-')+1:] if "-" in x else x).copy()
-    dataframe.loc[:,'melting_point'] = dataframe.melting_point\
-                                                        .apply(lambda x: x[x.index('to')+3:] if "to" in x else x).copy()
-
-    dataframe['melting_point'] = dataframe['melting_point'].apply(
-        lambda x: str(x).replace(",", ""))
-    dataframe['melting_point'] = dataframe['melting_point'].apply(
-        lambda x: str(x).replace(" ", ""))
-    dataframe = dataframe.astype({'melting_point': 'float64'})
-    dataframe.loc[dataframe.melting_unit == '°F', 'melting_point'] = \
-                                        dataframe.melting_point[dataframe.melting_unit == '°F'].apply(lambda x: (x-32)*5/9)
+    dataframe = dataframe[~dataframe.melting_point.isnull()]
 
     print('Finding water solubility...')
-    dataframe = dataframe[dataframe.water_solubility != 'no']
     dataframe = dataframe[~dataframe.water_solubility.isnull()]
 
     return dataframe
