@@ -1,8 +1,6 @@
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler, PowerTransformer
-
-# from tqdm import tqdm
 import pubchempy as pcp
 from time import ctime
 from helper_chemproperty import *
@@ -89,26 +87,9 @@ def prefilter(
     if label == "datafusion":
         # filter on only concentration endpoint
         resc = results[results.endpoint.str.contains("C")].copy()
-        if all_property == "no":
-            rconc = resc.loc[~(results.effect.str.contains(effect)), :]
-        elif all_property == "itself":
-            rconc = resc.loc[
-                ~(
-                    (~results.endpoint.str.contains(endpoint))
-                    & (results.effect.str.contains(effect))
-                ),
-                :,
-            ]
-        elif all_property == "all":
-            rconc = resc
-        elif all_property == "other":
-            rconc = resc.loc[
-                ~(
-                    results.endpoint.str.contains(endpoint)
-                    & results.effect.str.contains(effect)
-                ),
-                :,
-            ]
+
+        rconc = resc.loc[~(results.effect.str.contains(effect)), :]
+
         print("There are", rconc.shape[0], "tests.")
         test = tests.copy()
     elif label == "simple":

@@ -24,9 +24,9 @@ from helper_dataprocessing import *
 # The last file contains experiment results records: LC50, ACC, EC50, etc.
 # Aggregation of information tables on chemicals, species and tests is based on internal keys.
 
-DATA_RESULTS_PATH = ".../data/raw/results.txt"
-DATA_TEST_PATH = ".../data/raw/tests.txt"
-DATA_SPECIES_PATH = ".../data/raw/species.txt"
+DATA_RESULTS_PATH = ".../data/results.txt"
+DATA_TEST_PATH = ".../data/tests.txt"
+DATA_SPECIES_PATH = ".../data/species.txt"
 DATA_PROPERTY_PATH = [
     ".../data/DSSToxQueryWPred1.xlsx",
     ".../data/DSSToxQueryWPred2.xlsx",
@@ -45,7 +45,7 @@ tests, species, results, properties = load_raw_data(
 # Also, we removed embryos tests.
 
 results_prefiltered = prefilter(
-    species, tests, results, endpoint="LC50|EC50", effect="MOR"
+    species, tests, results, chosen_endpoint="LC50|EC50", chosen_effect="MOR"
 )
 
 # merging with the properties
