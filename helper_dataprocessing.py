@@ -1,8 +1,8 @@
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler, PowerTransformer
+from tqdm import tqdm
 import pubchempy as pcp
-from time import ctime
 from helper_chemproperty import *
 
 
@@ -48,7 +48,7 @@ def load_raw_data(
             ],
             axis=0,
         )
-        print(str(i) + " loaded", ctime())
+        print(str(i) + " loaded")
     df_property = df_property.rename(
         {
             "Substance_CASRN": "test_cas",
@@ -64,13 +64,7 @@ def load_raw_data(
 
 # ---------------------------------------------------------------------
 def prefilter(
-    species,
-    tests,
-    results,
-    endpoint=None,
-    label="simple",
-    all_property="no",
-    effect="MOR",
+    species, tests, results, endpoint=None, label=None, all_property="all", effect=None
 ):
     results.loc[:, "effect"] = results.effect.apply(
         lambda x: x.replace("/", "") if "/" in x else x
@@ -87,10 +81,26 @@ def prefilter(
     if label == "datafusion":
         # filter on only concentration endpoint
         resc = results[results.endpoint.str.contains("C")].copy()
-
-        rconc = resc.loc[~(results.effect.str.contains(effect)), :]
-
-        print("There are", rconc.shape[0], "tests.")
+        if all_property == "no":
+            rconc = resc.loc[~(results.effect.str.contains(effect)), :]
+        elif all_property == "itself":
+            rconc = resc.loc[
+                ~(
+                    (~results.endpoint.str.contains(endpoint))
+                    & (results.effect.str.contains(effect))
+                ),
+                :,
+            ]
+        elif all_property == "all":
+            rconc = resc
+        elif all_property == "other":
+            rconc = resc.loc[
+                ~(
+                    results.endpoint.str.contains(endpoint)
+                    & results.effect.str.contains(effect)
+                ),
+                :,
+            ]
         test = tests.copy()
     elif label == "simple":
         resc = results[(results.endpoint.str.contains(endpoint))]
@@ -112,12 +122,12 @@ def prefilter(
 
     # merging experiments and their relative results
     results_prefilter = rconc.merge(test_fish, on="test_id")
+    print("All merged into one dataframe. Size was", results_prefilter.shape, ".")
     print(
         "The unique chemical number was", len(results_prefilter.test_cas.unique()), "."
     )
-    print("All merged into one dataframe. Size was", results_prefilter.shape, ".")
-
     results_prefilter["test_cas"] = results_prefilter["test_cas"].apply(to_cas)
+    results_prefilter = results_prefilter[~results_prefilter.conc1_mean.isnull()]
     return results_prefilter
 
 
@@ -158,9 +168,7 @@ def impute_conc(results_prefiltered):
     db = db[db.conc1_unit.isin(keep_conc_unit)].copy()
 
     # remove the results are Not coded (NC), Not reported (NR) or null value.
-    to_drop_conc_mean = db[
-        (db.conc1_mean == "NC") | (db.conc1_mean == "NR") | db.conc1_mean.isnull()
-    ].index
+    to_drop_conc_mean = db[(db.conc1_mean == "NC") | (db.conc1_mean == "NR")].index
     db_filtered_mean = db.drop(to_drop_conc_mean).copy()
 
     # remove the asterisk inside the concentration value
@@ -173,6 +181,10 @@ def impute_conc(results_prefiltered):
         (db_filtered_mean.conc1_mean == ">100000") | (db_filtered_mean.conc1_mean == 0)
     ].index
     db_filtered_mean.drop(index=to_drop_invalid_conc, inplace=True)
+
+    # to_drop_invalid_conc = db_filtered_mean[(
+    #     db_filtered_mean.conc1_mean == 0)].index
+    # db_filtered_mean.drop(to_drop_invalid_conc, inplace=True)
 
     db_filtered_mean.loc[:, "conc1_mean"] = db_filtered_mean.conc1_mean.astype(
         float
@@ -299,7 +311,7 @@ def impute_test_feat(results_prefiltered):
 
 def impute_duration(results_prefiltered):
     """
-    With the help of obs_duration_unit, we change the experiments all
+    With the help of obs_duration_unit, we change the experiments all 
     last between [24, 48, 72, 96] hours.
     """
     # convert all units into hour
@@ -360,18 +372,12 @@ def impute_species(results_prefiltered):
     """
     db = results_prefiltered.copy()
     # Dropping missing values relative to species (same values are missing for genus)
-    # to_drop_spec = db[db.species.isnull()].index
-    # db.drop(to_drop_spec, inplace=True)
-    db = db[~db.species.isnull()]
+    to_drop_spec = db[db.species.isnull()].index
+    db.drop(to_drop_spec, inplace=True)
 
     # Dropping missing values relative to family
-    # to_drop_fam = db[db.family.isnull()].index
-    # db.drop(to_drop_fam, inplace=True)
-
-    db = db[~db.family.isnull()]
-    db = db[~db.genus.isnull()]
-    db = db[~db.tax_order.isnull()]
-    db = db[~db["class"].isnull()]
+    to_drop_fam = db[db.family.isnull()].index
+    db.drop(to_drop_fam, inplace=True)
 
     return db
 
@@ -463,7 +469,7 @@ def repeated_experiments(imputed_db):
 # -----------------------------------------------------------
 
 
-def crosstab_rep_exp(dataframe):
+def crosstab_rep_exp(dataframe, effect="MOR"):
     ct = pd.crosstab(dataframe.effect, dataframe.endpoint)
 
     # keep only when the dataset is large enough
@@ -474,7 +480,7 @@ def crosstab_rep_exp(dataframe):
     for j in new_ct.columns:
         for i in new_ct.index:
             # remove all other experiments about selected effect
-            if new_ct.loc[i, j] > 100:
+            if (new_ct.loc[i, j] > 100) & (i != effect):
                 pp = dataframe[dataframe.endpoint == j]
                 pp = pp[pp.effect == i]
 
@@ -500,8 +506,8 @@ def extract_mol_properties(features):
     features = features[~features.smiles.isnull()]
     features = features[~features.pubchem2d.isnull()]
     chem_feat = adding_smiles_features(features)
-    to_drop_nofeat = chem_feat[chem_feat["bonds_number"] == np.nan].index
-    chem_feat.drop(to_drop_nofeat, inplace=True)
+    # to_drop_nofeat = chem_feat[chem_feat['bonds_number'] == 'NaN'].index
+    # chem_feat.drop(to_drop_nofeat, inplace=True)
     to_drop_null = chem_feat[chem_feat.isnull().any(axis=1)].index
     chem_feat.drop(index=to_drop_null, inplace=True)
     return chem_feat
@@ -521,7 +527,7 @@ def process_features(chemical_features):
     minmax.fit(db[["atom_number"]])
     db[["atom_number"]] = minmax.transform(db[["atom_number"]])
 
-    db.mol_weight = db.mol_weight.apply(lambda x: np.log1p(x))
+    db.Mol = db.Mol.apply(lambda x: np.log1p(x))
     minmax = MinMaxScaler()
     minmax.fit(db[["mol_weight"]])
     db[["mol_weight"]] = minmax.transform(db[["mol_weight"]])
@@ -538,13 +544,23 @@ def process_features(chemical_features):
 
 # ----------------------------------------------------------
 
+# def smiles_to_pubchem(smiles):
+#     pubchem = []
+#     for i in tqdm(smiles):
+#         try:
+#             pubchem.append(
+#                 pcp.get_compounds(i, 'smiles')[0].cactvs_fingerprint)
+#         except:
+#             pubchem.append(np.NaN)
+#     return pubchem
+
 
 def smiles_to_pubchem(df):
 
     pubchem = pd.DataFrame()
     pubchem["smiles"] = df["smiles"].unique()
     pubchem["pubchem2d"] = np.nan
-    for i in range(pubchem.shape[0]):
+    for i in tqdm(range(pubchem.shape[0])):
         try:
             pubchem.loc[i, "pubchem2d"] = pcp.get_compounds(
                 pubchem["smiles"][i], "smiles"

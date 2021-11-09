@@ -24,14 +24,14 @@ from helper_dataprocessing import *
 # The last file contains experiment results records: LC50, ACC, EC50, etc.
 # Aggregation of information tables on chemicals, species and tests is based on internal keys.
 
-DATA_RESULTS_PATH = ".../data/results.txt"
-DATA_TEST_PATH = ".../data/tests.txt"
-DATA_SPECIES_PATH = ".../data/species.txt"
+DATA_RESULTS_PATH = r"data/raw/results.txt"
+DATA_TEST_PATH = r"data/raw/tests.txt"
+DATA_SPECIES_PATH = r"data/raw/species.txt"
 DATA_PROPERTY_PATH = [
-    ".../data/DSSToxQueryWPred1.xlsx",
-    ".../data/DSSToxQueryWPred2.xlsx",
-    ".../data/DSSToxQueryWPred3.xlsx",
-    ".../data/DSSToxQueryWPred4.xlsx",
+    "data/DSSToxQueryWPred1.xlsx",
+    "data/DSSToxQueryWPred2.xlsx",
+    "data/DSSToxQueryWPred3.xlsx",
+    "data/DSSToxQueryWPred4.xlsx",
 ]
 
 tests, species, results, properties = load_raw_data(
@@ -45,7 +45,7 @@ tests, species, results, properties = load_raw_data(
 # Also, we removed embryos tests.
 
 results_prefiltered = prefilter(
-    species, tests, results, chosen_endpoint="LC50|EC50", chosen_effect="MOR"
+    species, tests, results, endpoint="LC50|EC50", effect="MOR"
 )
 
 # merging with the properties
@@ -74,12 +74,17 @@ results = repeated_experiments(results_imputed)
 # you can use the alternative function "process_chemicals" which takes as input a dataset
 # with these info already extracted.
 
-# Option 1: get the properties
-# results_pub = smiles_to_pubchem(results)
+if 0:
+    # Option 1: get the properties
+    results_pub = smiles_to_pubchem(results)
+else:
+    # Option 2: use the saved file
+    # The smiles column was extracted from the raw property datasets (DSSToxQueryWPred1-4) for each chemical in our invivo dataset.
+    # The pubchem2d column was generated using the function smiles_to_pubchem() in helper_dataprocessing.py on all the chemicals in our in vivo dataset.
+    # The function gets pubchem2d from smiles using the PubChemPy package.
 
-# Option 2: use the saved file
-pubchem = pd.read_csv("/local/wujimeng/code_simone/data/cas_pub_tot.csv")
-results_pub = results.merge(pubchem[["smiles", "pubchem2d"]], on="smiles")
+    pubchem = pd.read_csv("../data/processed/cas_pub_tot.csv")
+    results_pub = results.merge(pubchem[["smiles", "pubchem2d"]], on="smiles")
 
 # extract other molecular properties
 results_chem = extract_mol_properties(results_pub)
@@ -93,5 +98,5 @@ results_chem = extract_mol_properties(results_pub)
 
 final_results = process_features(results_chem)
 
-final_results.to_csv("lc50_processed_jim.csv")
-print("data saved.")
+final_results.to_csv("lc_db_processed.csv")
+
