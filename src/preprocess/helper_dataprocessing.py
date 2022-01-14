@@ -1,14 +1,15 @@
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import MinMaxScaler, PowerTransformer
-
-# from tqdm import tqdm
 import pubchempy as pcp
 from time import ctime
-from helpers.helper_chemproperty import *
+from preprocess.helper_chemproperty import *
 
 
 def to_cas(num):
+    """
+    transform the CAS number in the dataset into standard CAS Registry Number form
+    """
     s = str(num)
     s = s[:-3] + "-" + s[-3:-1] + "-" + s[-1]
     return s
@@ -26,7 +27,9 @@ def load_raw_data(
     print("species loaded")
     print("Species table dimensions: ", species.shape)
 
-    results = pd.read_csv(DATA_PATH_RESULTS, sep="\|", engine="python", error_bad_lines=False)
+    results = pd.read_csv(
+        DATA_PATH_RESULTS, sep="\|", engine="python", error_bad_lines=False
+    )
     print("results loaded")
     print("Results table dimensions: ", results.shape)
 
