@@ -9,43 +9,43 @@ def getArguments():
     parser = argparse.ArgumentParser(description="Running KNN_model for datasets.")
     parser.add_argument("-i", "--input", help="inputFile position", required=True)
     parser.add_argument(
-        "-e", "--encoding", help="encoding: binary, multiclass", default="binary"
+        "-e",
+        "--encoding",
+        help="Classification type: binary, multiclass",
+        default="binary",
+    )
+    parser.add_argument("-if", "--input_info", help="input information", default="cte")
+    parser.add_argument(
+        "-ce",
+        "--cate_encoding",
+        help="methods to encoding the categorical features",
+        default="ordinal",
     )
     parser.add_argument(
         "-l",
         "--leaf_ls",
         help="list of leafs number to be chosen in the KNN mdoel",
-        required=True,
+        default=10,
         nargs="+",
         type=int,
     )
     parser.add_argument(
-        "-vf",
-        "--vitro_file",
-        help="whether the input file is about invitro",
-        default="False",
-    )
-    parser.add_argument(
-        "-n",
-        "--neighbors",
+        "-k",
+        "--k_num",
         help="list of neighbor value in the KNN model",
-        required=True,
-        nargs="+",
+        default=0,
         type=int,
     )
-
-    parser.add_argument("-o", "--output", help="outputFile", default="binary.txt")
+    parser.add_argument(
+        "-o", "--output", help="outputFile", default="results/knn_bi.txt"
+    )
     return parser.parse_args()
 
 
 # example:
 # python .../KNN.py -i ../lc50_processed.csv  -l 10 30 50 70 90 -n 1 -o .../1nn_bi.txt
-# python .../KNN.py -i ../invitro_processed.csv  -l 10 30 50 70 90 -vf True -n 1 -o  .../invitro_1nn_bi.txt
 
 args = getArguments()
-
-if args.vitro_file == "True":
-    categorical = ["class", "tax_order", "family", "genus", "species"]
 
 if args.encoding == "binary":
     encoding = "binary"
@@ -60,121 +60,118 @@ print("loading dataset...", ctime())
 X, Y = load_data(
     args.input,
     encoding=encoding,
+    label=args.input_info,
+    cate_encoding=args.cate_encoding,
     categorical_columns=categorical,
     encoding_value=encoding_value,
     seed=42,
 )
 
-
 # splitting into train and test dataset
-X_train, X_test, Y_train, Y_test = train_test_split(
+X_trainvalid, X_test, Y_trainvalid, Y_test = train_test_split(
     X, Y, test_size=0.2, random_state=42
 )
 
 # -------------------training --------------------
-# using 5-fold cross validation to choose the alphas with best accuracy
-sequence_alpha = np.logspace(-5, 0, 30)
-# sequence_alpha = np.logspace(-2, 0, 50)
-
 print("training start", ctime())
-best_ah, best_ap, best_leaf, best_neighbor, best_results = select_alpha(
-    X_train,
-    Y_train,
-    categorical,
-    non_categorical,
-    sequence_alpha,
-    args.leaf_ls,
-    args.neighbors,
-    encoding,
-)
-print(ctime())
+if args.k_num:
+    # using 5-fold cross validation to choose the alphas with best accuracy
+    sequence_alpha = np.logspace(-5, 0, 30)
+    # sequence_alpha = np.logspace(-5, 0, 3)
+
+    best_ah, best_ap, best_leaf, best_result = select_alpha(
+        X_trainvalid,
+        Y_trainvalid,
+        categorical,
+        numerical,
+        sequence_alpha,
+        args.leaf_ls,
+        args.k_num,
+        encoding,
+    )
+
+    df_mean = pd.DataFrame(best_result.mean(axis=0)).transpose()
+    df_std = pd.DataFrame(best_result.std(axis=0)).transpose()
+    # df_knn_train = pd.concat(
+    #     [df_mean, df_std], keys=["train_mean", "train_std"]
+    # ).reset_index(level=1, drop=True)
+else:
+    k_ls = [1, 2, 3, 4, 5, 7, 9, 11, 13, 15, 17, 19, 21, 31]
+    # k_ls = [1, 2, 3, 4, 5]
+    df_knn_train = pd.DataFrame()
+    for i in k_ls:
+        model = KNeighborsClassifier(n_neighbors=i)
+        result = cv_train_model(X_trainvalid, Y_trainvalid, model, encoding)
+
+        df_mean = pd.DataFrame(result.mean(axis=0)).transpose()
+        df_std = pd.DataFrame(result.std(axis=0)).transpose()
+        df_mean.loc[0, "K"] = i
+        df_std.loc[0, "K"] = i
+
+        df_train_score = pd.concat(
+            [df_mean, df_std], keys=["train_mean", "train_std"], names=["series_name"]
+        ).reset_index(level=1, drop=True)
+        df_knn_train = pd.concat([df_knn_train, df_train_score], axis=0)
+print("training ends.", ctime())
 
 # -------------------tested on test dataset--------------------
-
+print("testing start.", ctime())
 # min max transform the numerical columns
-minmax = MinMaxScaler().fit(X_train[non_categorical])
-X_train[non_categorical] = minmax.transform(X_train.loc[:, non_categorical])
-X_test[non_categorical] = minmax.transform(X_test.loc[:, non_categorical])
-
-matrix = dist_matrix(X_test, X_train, non_categorical, categorical, best_ah, best_ap)
-matrix_train = dist_matrix(
-    X_train, X_train, non_categorical, categorical, best_ah, best_ap
-)
-neigh = KNeighborsClassifier(
-    n_neighbors=best_neighbor, metric="precomputed", leaf_size=best_leaf
-)
-neigh.fit(matrix_train, Y_train.astype("int").ravel())
-y_pred = neigh.predict(matrix)
-
-# calculate the score
-if encoding == "binary":
-
-    accs = accuracy_score(Y_test, y_pred)
-    sens = recall_score(Y_test, y_pred, average="macro")
-    tn, fp, fn, tp = confusion_matrix(Y_test, y_pred, labels=[0, 1]).ravel()
-    specs = tn / (tn + fp)
-    precs = precision_score(Y_test, y_pred, average="macro")
-    f1 = f1_score(Y_test, y_pred, average="macro")
-
-elif encoding == "multiclass":
-    accs = accuracy_score(Y_test, y_pred)
-    sens = recall_score(Y_test, y_pred, average="macro")
-    specs = np.nan
-    precs = precision_score(Y_test, y_pred, average="macro")
-    f1 = f1_score(Y_test, y_pred, average="macro")
+minmax = MinMaxScaler().fit(X_trainvalid[numerical])
+temp_train = X_trainvalid.copy()
+temp_test = X_test.copy()
+temp_train[numerical] = minmax.transform(temp_train.loc[:, numerical])
+temp_test[numerical] = minmax.transform(temp_test.loc[:, numerical])
 
 
-print(
-    "Accuracy: ",
-    accs,
-    "se:",
-    best_results["se_accs"],
-    "\n Sensitivity:",
-    sens,
-    "se:",
-    best_results["se_sens"],
-    "\n Specificity",
-    specs,
-    "se:",
-    best_results["se_specs"],
-    "\n Precision",
-    precs,
-    "se:",
-    best_results["se_precs"],
-    "\n F1 score:",
-    f1,
-    "se:",
-    best_results["se_f1"],
-)
-
-# ----------------saving the information into a file-------
-info = []
-info.append(
-    """The best params were alpha_h:{}, alpha_p:{} ,leaf:{},neighbor:{}""".format(
-        best_ah, best_ap, best_leaf, best_neighbor
+if args.k_num:
+    matrix_test = dist_matrix(
+        temp_test, temp_train, numerical, categorical, best_ah, best_ap
     )
-)
-info.append(
-    """Accuracy:  {}, Se.Accuracy:  {}
-		\nSensitivity:  {}, Se.Sensitivity: {}
-        \nSpecificity:  {}, Se.Specificity:{}
-		\nPrecision:  {}, Se.Precision: {}
-		\nf1_score:{}, Se.f1_score:{}""".format(
-        accs,
-        best_results["se_accs"],
-        sens,
-        best_results["se_sens"],
-        specs,
-        best_results["se_specs"],
-        precs,
-        best_results["se_precs"],
-        f1,
-        best_results["se_f1"],
+    matrix_train = dist_matrix(
+        temp_train, temp_train, numerical, categorical, best_ah, best_ap
     )
-)
+    model = KNeighborsClassifier(
+        n_neighbors=args.k_num, metric="precomputed", leaf_size=best_leaf
+    )
+    # model.fit(matrix_train, Y_trainvalid.astype("int").ravel())
+    # y_pred = model.predict(matrix_test)
+    df_knn_test = fit_and_predict(
+        model,
+        matrix_train,
+        Y_trainvalid.astype("int").ravel(),
+        matrix_test,
+        Y_test,
+        encoding,
+    )
+    df_knn = pd.concat(
+        [df_mean, df_std, df_knn_test],
+        keys=["train_mean", "train_std", "test"],
+        names=["series_name"],
+    ).reset_index(level=1, drop=True)
 
-info.append("The parameters was selected from {}".format("np.logspace(-2, 0, 30)"))
-info.append("The leaf was selected from {}".format(args.leaf_ls))
+    df_knn["best_ah"], df_knn["best_ap"], df_knn["best_leaf"] = (
+        best_ah,
+        best_ap,
+        best_leaf,
+    )
+else:
+    df_knn_test = pd.DataFrame()
+    for i in k_ls:
+        model = KNeighborsClassifier(n_neighbors=i)
+        df_test_score = fit_and_predict(
+            model, temp_train, Y_trainvalid, temp_test, Y_test, encoding
+        )
+        df_test_score.loc[0, "K"] = i
+
+        df_knn_test = pd.concat([df_knn_test, df_test_score], axis=0).reset_index(
+            drop=True
+        )
+
+    df_knn_test["series_name"] = "test"
+    df_knn_test.set_index("series_name", inplace=True)
+    df_knn = pd.concat([df_knn_train, df_knn_test])
 
 
-str2file(info, args.output)
+# ----------------save the information into a file-------
+df2file(df_knn, args.output)

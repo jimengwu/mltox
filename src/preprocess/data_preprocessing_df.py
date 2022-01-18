@@ -1,5 +1,16 @@
 from preprocess.helper_dataprocessing import *
+import argparse
 
+
+def getArguments():
+    parser = argparse.ArgumentParser(description="Running data cleaning.")
+    parser.add_argument(
+        "-o", "--output", help="outputFile", default="df_db_processed.csv"
+    )
+    return parser.parse_args()
+
+
+args = getArguments()
 # -----------------------Step 1: Load Data---------------------------------
 
 # We used three experiment records files from Ecotox with version of
@@ -91,7 +102,7 @@ results_chem = extract_mol_properties(results_pub)
 
 final_results = process_features(results_chem)
 
-final_results.to_csv("data/processed/df_db_processed.csv")
+final_results.to_csv(args.output)
 
 
 # The website was ftp://newftp.epa.gov/COMPTOX/Sustainable_Chemistry_Data/Chemistry_Dashboard

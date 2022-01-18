@@ -1,10 +1,7 @@
 from helper_model import *
 from sklearn.model_selection import train_test_split, ParameterSampler
 import h2o
-from tqdm import tqdm
 import argparse
-
-import os
 
 
 def getArguments():
@@ -15,28 +12,19 @@ def getArguments():
     parser.add_argument(
         "-idf", "--input_df", help="input datafusion File position", required=True
     )
+    parser.add_argument(
+        "-ce",
+        "--cate_encoding",
+        help="methods to encoding the categorical features",
+        default="ordinal",
+    )
     parser.add_argument("-e", "--encoding", help="encoding", default="binary")
+    parser.add_argument("-if", "--input_info", help="input information", default="cte")
     parser.add_argument(
-        "-il",
-        "--invitro_label",
-        help=" input invitro form: number, label, both, representing using the concentration value\
-             of invitro experiment, labeled class value of the invitro experiment, or both",
-        default="number",
-    )
-
-    parser.add_argument(
-        "-wi",
-        "--w_invitro",
-        help="using the invitro as input or not: True, False, own;\
-         representing using invivo plus invitro information as input, using only invivo information as input\
-             using only invitro information as input",
-        default="False",
+        "-ah", "--alpha_h", help="alpha_hamming", default=False, nargs="?"
     )
     parser.add_argument(
-        "-ah", "--alpha_h", help="alpha_hamming", required=True, nargs="?"
-    )
-    parser.add_argument(
-        "-ap", "--alpha_p", help="alpha_pubchem", required=True, nargs="?"
+        "-ap", "--alpha_p", help="alpha_pubchem", default=False, nargs="?"
     )
     parser.add_argument(
         "-n",
@@ -47,17 +35,20 @@ def getArguments():
         type=int,
     )
     parser.add_argument(
-        "-endpoint", "--train_endpoint", help="train_endpoint", required=True
+        "-endpoint",
+        "--train_endpoint",
+        help="train_endpoint",
+        default="['LC50','EC50']",
     )
-    parser.add_argument("-effect", "--train_effect", help="train_effect", required=True)
-    parser.add_argument("-o", "--output", help="outputFile", default="binary.txt")
+    parser.add_argument("-effect", "--train_effect", help="train_effect", default="MOR")
+    parser.add_argument(
+        "-o", "--output", help="outputFile", default="results/df_rasar_bi.txt"
+    )
     return parser.parse_args()
 
 
 # example:
 # python .../RASAR_df.py -i .../lc50_processed.csv  -idf  .../datafusion.csv  -endpoint ['LC50','EC50'] -effect 'MOR'  -ah 0.1 -ap 0.1 -o df_rasar.txt
-# python .../RASAR_df.py -i1 .../lc50_processed_w_invitro.csv -idf  .../datafusion.csv -il label -wi True -endpoint ['LC50','EC50'] -effect 'MOR' -ah 0.1 -ap 0.1 -o .../df_rasar_invitro.txt
-
 
 args = getArguments()
 if args.encoding == "binary":
@@ -68,49 +59,46 @@ elif args.encoding == "multiclass":
     encoding_value = [0.1, 1, 10, 100]
 
 # -------------------loading data & preprocessing--------------------
+print("loading dataset...", ctime())
+
 db_mortality, db_datafusion = load_datafusion_datasets(
     args.input,
     args.input_df,
     categorical_columns=categorical,
+    label=args.input_info,
+    cate_encoding=args.cate_encoding,
     encoding=encoding,
     encoding_value=encoding_value,
 )
 
+
 X = db_mortality.drop(columns="conc1_mean").copy()
 Y = db_mortality.conc1_mean.values
 
-X_train, X_test, Y_train, Y_test = train_test_split(
+X_trainvalid, X_test, Y_trainvalid, Y_test = train_test_split(
     X, Y, test_size=0.2, random_state=42
 )
 
-print("Data loaded.", ctime())
 
-print("calcultaing distance matrix..", ctime())
-matrix_euc, matrix_h, matrix_p = cal_matrixs(
-    X_train, X_train, categorical, non_categorical
-)
-print("calcultaing datafusion distance matrix..", ctime())
-matrix_euc_df, matrix_h_df, matrix_p_df = cal_matrixs(
-    X_train,
-    db_datafusion.drop(columns="conc1_mean").copy(),
-    categorical,
-    non_categorical,
-)
-print("distance matrixes successfully calculated!", ctime())
-
-
-if args.alpha_h == "logspace":
-    sequence_ap = np.logspace(-2, 0, 20)
-    sequence_ah = sequence_ap
+if args.alpha_h:
+    print("calcultaing distance matrixes..", ctime())
+    matrix_euc, matrix_h, matrix_p = cal_matrixs(
+        X_trainvalid, X_trainvalid, categorical, numerical
+    )
+    # print("calcultaing datafusion distance matrix..", ctime())
+    matrix_euc_df, matrix_h_df, matrix_p_df = cal_matrixs(
+        X_trainvalid,
+        db_datafusion.drop(columns="conc1_mean").copy(),
+        categorical,
+        numerical,
+    )
+    print("distance matrixes successfully calculated!", ctime())
 else:
-    sequence_ap = [float(args.alpha_p)]
-    sequence_ah = [float(args.alpha_h)]
-
-if args.w_invitro == "True":
-    db_invitro = "overlap"
-else:
-    db_invitro = "noinvitro"
-
+    df_rasar_label_train, df_rasar_label_test = woalphas_label_df_rasar(
+        X_trainvalid, X_test, db_datafusion, comparing=["test_cas"]
+    )
+    X_trainvalid = X_trainvalid.drop(columns="test_cas")
+    X_test = X_test.drop(columns="test_cas")
 
 # -------------------training --------------------
 if encoding == "binary":
@@ -133,188 +121,164 @@ elif encoding == "multiclass":
     }
 
 params_comb = list(ParameterSampler(hyper_params_tune, n_iter=20, random_state=2))
+# n_iter=20, random_state=2
 
 best_accs = 0
 best_p = dict()
 
-count = 1
-for ah in sequence_ah:
-    for ap in sequence_ap:
-        for i in range(0, len(params_comb)):
-            print(
-                "*" * 50,
-                count / (len(sequence_ap) ** 2 * len(params_comb)),
-                ctime(),
-                end="\r",
-            )
-            for k, v in params_comb[i].items():
-                setattr(model, k, v)
+count = 0
+print("training process start..", ctime())
+for i in range(0, len(params_comb)):
+    print(
+        "*" * 50,
+        count / len(params_comb),
+        ctime(),
+        end="\r",
+    )
+    count = count + 1
 
-            results = cv_datafusion_rasar(
-                matrix_euc,
-                matrix_h,
-                matrix_p,
-                matrix_euc_df,
-                matrix_h_df,
-                matrix_p_df,
-                db_invitro_matrix="nan",
-                ah=ah,
-                ap=ap,
-                X=X_train,
-                Y=Y_train,
-                db_datafusion=db_datafusion,
-                train_endpoint=args.train_endpoint,
-                train_effect=args.train_effect,
-                model=model,
-                n_neighbors=args.n_neighbors,
-                invitro=args.w_invitro,
-                invitro_form=args.invitro_label,
-                db_invitro=db_invitro,
-                encoding=encoding,
-            )
-
-            if results["avg_accs"] > best_accs:
-                best_p = params_comb[i]
-                best_accs = results["avg_accs"]
-                best_results = results
-                best_ah = ah
-                best_ap = ap
-                print("success.", best_accs)
-
-            count = count + 1
+    for k, v in params_comb[i].items():
+        setattr(model, k, v)
+    if args.alpha_h:
+        result = model_df_rasar(
+            matrix_euc,
+            matrix_h,
+            matrix_p,
+            matrix_euc_df,
+            matrix_h_df,
+            matrix_p_df,
+            ah=float(args.alpha_h),
+            ap=float(args.alpha_p),
+            X=X_trainvalid,
+            Y=Y_trainvalid,
+            db_datafusion=db_datafusion,
+            train_endpoint=args.train_endpoint,
+            train_effect=args.train_effect,
+            model=model,
+            n_neighbors=args.n_neighbors,
+            encoding=encoding,
+        )
+    else:
+        result = woalphas_model_df_rasar(
+            X_trainvalid,
+            Y_trainvalid,
+            db_datafusion,
+            model,
+            df_rasar_label_train,
+            encoding,
+        )
+    if np.mean(result.accuracy) > best_accs:
+        best_p = params_comb[i]
+        best_accs = np.mean(result.accuracy)
+        best_result = result
+df_mean = pd.DataFrame(best_result.mean(axis=0)).transpose()
+df_std = pd.DataFrame(best_result.std(axis=0)).transpose()
 
 # -------------------tested on test dataset--------------------
 print("start testing...", ctime())
 for k, v in best_p.items():
     setattr(model, k, v)
 
-train_index = X_train.index
+train_index = X_trainvalid.index
 test_index = X_test.index
 
+if args.alpha_h:
+    matrix_euc, matrix_h, matrix_p = cal_matrixs(X, X, categorical, numerical)
+    matrix_euc_df, matrix_h_df, matrix_p_df = cal_matrixs(
+        X, db_datafusion.drop(columns="conc1_mean").copy(), categorical, numerical
+    )
 
-matrix_euc, matrix_h, matrix_p = cal_matrixs(X, X, categorical, non_categorical)
-matrix_euc_df, matrix_h_df, matrix_p_df = cal_matrixs(
-    X, db_datafusion.drop(columns="conc1_mean").copy(), categorical, non_categorical
-)
+    matrix_euc = pd.DataFrame(matrix_euc)
+    max_euc = matrix_euc.iloc[train_index, train_index].values.max()
 
-matrix_euc = pd.DataFrame(matrix_euc)
-max_euc = matrix_euc.iloc[train_index, train_index].values.max()
+    matrix = pd.DataFrame(
+        float(args.alpha_h) * matrix_h
+        + float(args.alpha_p) * matrix_p
+        + matrix_euc.divide(max_euc).values
+    )
+    db_datafusion_matrix = pd.DataFrame(
+        float(args.alpha_h) * matrix_h_df
+        + float(args.alpha_p) * matrix_p_df
+        + pd.DataFrame(matrix_euc_df).divide(max_euc).values
+    )
 
-matrix = pd.DataFrame(
-    best_ah * matrix_h + best_ap * matrix_p + matrix_euc.divide(max_euc).values
-)
-db_datafusion_matrix = pd.DataFrame(
-    best_ah * matrix_h_df
-    + best_ap * matrix_p_df
-    + pd.DataFrame(matrix_euc_df).divide(max_euc).values
-)
+    s_rasar_train, s_rasar_test = cal_s_rasar(
+        matrix.iloc[train_index.astype("int64"), train_index.astype("int64")],
+        matrix.iloc[test_index.astype("int64"), train_index.astype("int64")],
+        Y_trainvalid,
+        args.n_neighbors,
+        encoding,
+    )
 
-del (matrix_euc, matrix_h, matrix_p, matrix_euc_df, matrix_h_df, matrix_p_df)
+    df_rasar_train, df_rasar_test = cal_df_rasar(
+        train_index,
+        test_index,
+        X_trainvalid,
+        X_test,
+        db_datafusion,
+        db_datafusion_matrix,
+        args.train_endpoint,
+        args.train_effect,
+        encoding,
+    )
 
-simple_rasar_train, simple_rasar_test = cal_data_simple_rasar(
-    matrix.iloc[train_index.astype("int64"), train_index.astype("int64")],
-    matrix.iloc[test_index.astype("int64"), train_index.astype("int64")],
-    Y_train,
-    args.n_neighbors,
-    encoding,
-)
-
-datafusion_rasar_train, datafusion_rasar_test = cal_data_datafusion_rasar(
-    train_index,
-    test_index,
-    X_train,
-    X_test,
-    db_datafusion,
-    db_datafusion_matrix,
-    args.train_endpoint,
-    args.train_effect,
-    encoding,
-)
-del (matrix, db_datafusion_matrix)
-
-train_rf = pd.concat([simple_rasar_train, datafusion_rasar_train], axis=1)
-test_rf = pd.concat([simple_rasar_test, datafusion_rasar_test], axis=1)
-
-invitro_form = args.invitro_label
-invitro = args.w_invitro
-
-# adding invitro information
-if str(db_invitro) == "overlap":
-    if (invitro != "False") & (invitro_form == "number"):
-        train_rf["invitro_conc"] = X_train.invitro_conc.reset_index(drop=True)
-        test_rf["invitro_conc"] = X_test.invitro_conc.reset_index(drop=True)
-
-    elif (invitro != "False") & (invitro_form == "label"):
-        train_rf["invitro_label"] = X_train.invitro_label_half.reset_index(drop=True)
-        test_rf["invitro_label"] = X_test.invitro_label_half.reset_index(drop=True)
-
-    elif (invitro != "False") & (invitro_form == "both"):
-        train_rf["invitro_conc"] = X_train.invitro_conc.reset_index(drop=True)
-        test_rf["invitro_conc"] = X_test.invitro_conc.reset_index(drop=True)
-        train_rf["invitro_label"] = X_train.invitro_label_half.reset_index(drop=True)
-        test_rf["invitro_label"] = X_test.invitro_label_half.reset_index(drop=True)
-    elif (invitro != "False") & (invitro_form == "label_half"):
-        train_rf["invitro_label_half"] = X.iloc[
-            train_index, :
-        ].invitro_label.reset_index(drop=True)
-        test_rf["invitro_label_half"] = X.iloc[test_index, :].invitro_label.reset_index(
-            drop=True
-        )
-
-    elif (invitro != "False") & (invitro_form == "both_half"):
-        train_rf["invitro_conc"] = X.iloc[train_index, :].invitro_conc.reset_index(
-            drop=True
-        )
-        test_rf["invitro_conc"] = X.iloc[test_index, :].invitro_conc.reset_index(
-            drop=True
-        )
-        train_rf["invitro_label_half"] = X.iloc[
-            train_index, :
-        ].invitro_label.reset_index(drop=True)
-        test_rf["invitro_label_half"] = X.iloc[test_index, :].invitro_label.reset_index(
-            drop=True
-        )
+    train_rasar = pd.concat([s_rasar_train, df_rasar_train], axis=1)
+    test_rasar = pd.concat([s_rasar_test, df_rasar_test], axis=1)
 
 
-del (
-    datafusion_rasar_test,
-    datafusion_rasar_train,
-    simple_rasar_test,
-    simple_rasar_train,
-)
+else:
+    minmax = MinMaxScaler().fit(X_trainvalid[numerical])
 
-print(train_rf.columns)
+    X_trainvalid[numerical] = minmax.transform(X_trainvalid.loc[:, numerical])
+    X_test[numerical] = minmax.transform(X_test.loc[:, numerical])
+    db_datafusion[numerical] = minmax.transform(db_datafusion.loc[:, numerical])
 
-# calculateing the scores
+    s_rasar_train, s_rasar_test = woalphas_cal_s_rasar(
+        X_trainvalid, X_test, Y_trainvalid, Y_test, encoding
+    )
+
+    df_rasar_train, df_rasar_test = woalphas_cal_df_rasar(
+        X_trainvalid, X_test, db_datafusion
+    )
+    train_rasar = pd.concat(
+        [
+            s_rasar_train[s_rasar_train.filter(like="dist").columns],
+            df_rasar_train,
+            df_rasar_label_train,
+        ],
+        axis=1,
+    )
+    test_rasar = pd.concat(
+        [
+            s_rasar_test[s_rasar_test.filter(like="dist").columns],
+            df_rasar_test,
+            df_rasar_label_test,
+        ],
+        axis=1,
+    )
+
 if encoding == "binary":
-
-    model.fit(train_rf, Y_train)
-    y_pred = model.predict(test_rf)
-
-    accs = accuracy_score(Y_test, y_pred)
-    sens = recall_score(Y_test, y_pred, average="macro")
-    tn, fp, fn, tp = confusion_matrix(Y_test, y_pred, labels=[0, 1]).ravel()
-    specs = tn / (tn + fp)
-    precs = precision_score(Y_test, y_pred, average="macro")
-    f1 = f1_score(Y_test, y_pred, average="macro")
+    df_test_score = fit_and_predict(
+        model, train_rasar, Y_trainvalid, test_rasar, Y_test, encoding
+    )
 elif encoding == "multiclass":
 
-    train_rf.loc[:, "target"] = Y_train
-    test_rf.loc[:, "target"] = Y_test
+    train_rasar.loc[:, "target"] = Y_trainvalid
+    test_rasar.loc[:, "target"] = Y_test
 
-    train_rf_h2o = h2o.H2OFrame(train_rf)
-    test_rf_h2o = h2o.H2OFrame(test_rf)
+    train_rasar_h2o = h2o.H2OFrame(train_rasar)
+    test_rasar_h2o = h2o.H2OFrame(test_rasar)
 
-    for col in train_rf.columns:
+    for col in train_rasar.columns:
         if "label" in col:
-            train_rf_h2o[col] = train_rf_h2o[col].asfactor()
-            test_rf_h2o[col] = test_rf_h2o[col].asfactor()
+            train_rasar_h2o[col] = train_rasar_h2o[col].asfactor()
+            test_rasar_h2o[col] = test_rasar_h2o[col].asfactor()
 
-    train_rf_h2o["target"] = train_rf_h2o["target"].asfactor()
-    test_rf_h2o["target"] = test_rf_h2o["target"].asfactor()
+    train_rasar_h2o["target"] = train_rasar_h2o["target"].asfactor()
+    test_rasar_h2o["target"] = test_rasar_h2o["target"].asfactor()
 
-    model.train(y="target", training_frame=train_rf_h2o)
-    y_pred = model.predict(test_rf_h2o).as_data_frame()["predict"]
+    model.train(y="target", training_frame=train_rasar_h2o)
+    y_pred = model.predict(test_rasar_h2o).as_data_frame()["predict"]
 
     accs = accuracy_score(Y_test, y_pred)
     sens = recall_score(Y_test, y_pred, average="macro")
@@ -322,50 +286,22 @@ elif encoding == "multiclass":
     precs = precision_score(Y_test, y_pred, average="macro")
     f1 = f1_score(Y_test, y_pred, average="macro")
 
-print(
-    """Accuracy:  {}, Se.Accuracy:  {} 
-		\nSensitivity:  {}, Se.Sensitivity: {}
-        \nSpecificity:  {}, Se.Specificity:{}
-		\nPrecision:  {}, Se.Precision: {}
-		\nf1_score:{}, Se.f1_score:{}""".format(
-        accs,
-        best_results["se_accs"],
-        sens,
-        best_results["se_sens"],
-        specs,
-        best_results["se_specs"],
-        precs,
-        best_results["se_precs"],
-        f1,
-        best_results["se_f1"],
-    )
+    model.train(y="target", training_frame=train_rasar_h2o)
+    y_pred = model.predict(test_rasar_h2o).as_data_frame()["predict"]
+
+    df_test_score = pd.DataFrame()
+    df_test_score.loc[0, "accuracy"] = accuracy_score(Y_test, y_pred)
+    df_test_score.loc[0, "recall"] = recall_score(Y_test, y_pred, average="macro")
+    df_test_score.loc[0, "specificity"] = np.nan
+    df_test_score.loc[0, "f1"] = f1_score(Y_test, y_pred, average="macro")
+    df_test_score.loc[0, "precision"] = precision_score(Y_test, y_pred, average="macro")
+
+df_output = pd.concat(
+    [df_mean, df_std, df_test_score],
+    keys=["train_mean", "train_std", "test"],
+    names=["series_name"],
 )
+df_output["model"] = str(best_p)
 
 # ----------------save the information into a file-------
-info = []
-
-info.append(
-    """Accuracy:  {}, Se.Accuracy:  {} 
-    \nSensitivity:  {}, Se.Sensitivity: {}
-        \nSpecificity:  {}, Se.Specificity:{}
-    \nPrecision:  {}, Se.Precision: {}
-    \nf1_score:{}, Se.f1_score:{}""".format(
-        accs,
-        best_results["se_accs"],
-        sens,
-        best_results["se_sens"],
-        specs,
-        best_results["se_specs"],
-        precs,
-        best_results["se_precs"],
-        f1,
-        best_results["se_f1"],
-    )
-)
-
-info.append(
-    "alpha_h:{}, alpha_p: {}, best hyperpatameters:{}".format(best_ah, best_ap, best_p)
-)
-
-
-str2file(info, args.output)
+df2file(df_output, args.output)
