@@ -96,6 +96,5 @@ Optional arguments:
     └── README.md
 
 ## Authors
-Jimeng Wu
-Simone D'Ambrosi
-Mentor: Marco Baity-Jesi
+- Jimeng Wu
+*Supervisor*: Marco Baity-Jesi
