@@ -23,9 +23,9 @@ The data on the experiments is downloaded from Ecotox. Documentation on the data
 
 Download the entire database as an ASCII file from the website, or do it from command line through
 ```
-wget https://gaftp.epa.gov/ecotox/ecotox_ascii_03_15_2021.zip # This is for the version of 15 March 2021
-unzip ecotox_ascii_03_15_2021.zip # Decompress
-mv ecotox_ascii_03_15_2021 data/raw/ # Move it to the raw data directory
+wget https://gaftp.epa.gov/ecotox/ecotox_ascii_09_15_2020.zip # This is for the version of 15 March 2021
+unzip ecotox_ascii_09_15_2020.zip # Decompress
+mv ecotox_ascii_09_15_2020 data/raw/ # Move it to the raw data directory
 wget https://gaftp.epa.gov/COMPTOX/Sustainable_Chemistry_Data/Chemistry_Dashboard/DSSTox_Predicted_NCCT_Model.zip  # chemical properties
 unzip DSSTox_Predicted_NCCT_Model.zip # Decompress
 mv DSSTox_Predicted_NCCT_Model data/raw/ # Move it to the raw data directory
