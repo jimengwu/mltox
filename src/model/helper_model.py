@@ -6,6 +6,7 @@ from sklearn.preprocessing import OrdinalEncoder, MinMaxScaler, OneHotEncoder
 from sklearn.model_selection import KFold, train_test_split, ParameterSampler
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import (
     recall_score,
     confusion_matrix,
@@ -14,15 +15,11 @@ from sklearn.metrics import (
     f1_score,
 )
 from time import ctime
-from tqdm import tqdm
-from sklearn.ensemble import RandomForestClassifier
+from collections import Counter
 import h2o
 from h2o.estimators.random_forest import H2ORandomForestEstimator
-import warnings
-from numpy.lib.stride_tricks import as_strided
 import os
-from collections import Counter
-
+import warnings
 warnings.filterwarnings("ignore")
 
 
@@ -59,8 +56,6 @@ numerical = [
 
 # comparing was used to identify similar experiments
 comparing = ["test_cas"] + categorical
-
-tqdm.pandas(desc="Bar")
 
 """Given an LC50-Mortality experiment, this function checks if there is another experiment with
 other endpoint and effect done in the same condition. If it exists in the other database and the similar
@@ -442,10 +437,18 @@ def select_alpha(
     print("Distance matrix finished.", ctime())
 
     best_accs = 0
+    count = 0
     print("Start selecting the best parameters....")
-    for ah in tqdm(sequence_ham):
+    for ah in sequence_ham:
         for ap in sequence_ham:
             for leaf in leaf_ls:
+                print(
+                    "*" * 50,
+                    count / len(sequence_ham)**2*len(leaf_ls),
+                    ctime(),
+                    end="\r",
+                )
+                count = count + 1
                 result = KNN_model(
                     matrix_euc,
                     matrix_h,
@@ -548,7 +551,9 @@ def take_per_row_strided(A, indx, num_elem=2):
 
     l_indx = indx + n * np.arange(len(indx))
 
-    out = as_strided(A, (len(A) - int(num_elem) + 1, num_elem), (s0, s0))[l_indx]
+    out = np.lib.stride_tricks(A, (len(A) - int(num_elem) + 1, num_elem), (s0, s0))[
+        l_indx
+    ]
     A.shape = m, n
     return out
 
@@ -873,8 +878,15 @@ def woalphas_label_df_rasar(
 
     df_rasar_label_train = pd.DataFrame()
     df_rasar_label_test = pd.DataFrame()
-
-    for g in tqdm(grouped_datafusion.groups):
+    count = 0
+    for g in (grouped_datafusion.groups):
+        print(
+        "*" * 50,
+        count / len(grouped_datafusion.groups),
+        ctime(),
+        end="\r",
+        )
+        count = count + 1
         name = g[0] + "_" + g[1] + "_" + "label"
 
         group = grouped_datafusion.get_group(g).drop(columns=["endpoint", "effect"])

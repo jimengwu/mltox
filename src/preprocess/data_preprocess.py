@@ -1,4 +1,4 @@
-from helper_dataprocessing import *
+from helper_dataprocess import *
 import argparse
 
 
@@ -8,6 +8,7 @@ def getArguments():
         "-o", "--output", help="outputFile", default="lc_db_processed.csv"
     )
     return parser.parse_args()
+
 
 args = getArguments()
 # -----------------------Step 1: Load Data---------------------------------
