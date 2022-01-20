@@ -94,8 +94,14 @@ if args.alpha_h:
     )
     print("distance matrixes successfully calculated!", ctime())
 else:
+    comparing = np.setdiff1d(
+        db_datafusion.columns,
+        numerical
+        + ["pub" + str(i) for i in range(1, 882)]
+        + ["endpoint", "effect", "conc1_mean"],
+    )
     df_rasar_label_train, df_rasar_label_test = woalphas_label_df_rasar(
-        X_trainvalid, X_test, db_datafusion, comparing=["test_cas"]
+        X_trainvalid, X_test, db_datafusion, comparing
     )
     X_trainvalid = X_trainvalid.drop(columns="test_cas")
     X_test = X_test.drop(columns="test_cas")
